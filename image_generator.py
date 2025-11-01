@@ -21,40 +21,38 @@ else:
     DEVICE = "cpu"
     DTYPE = torch.float32
 
-print(f"🔄 Loading Stable Diffusion XL pipelines on device: {DEVICE}")
+print(f"🔄 Using device: {DEVICE}")
 
-# Load text-to-image pipeline
-text2img_pipe = StableDiffusionXLPipeline.from_single_file(
-    MODEL_PATH,
-    torch_dtype=DTYPE
-).to(DEVICE)
+# Function to load pipeline dynamically
+def get_pipe(pipe_type="text2img"):
+    if pipe_type == "text2img":
+        pipe = StableDiffusionXLPipeline.from_single_file(
+            MODEL_PATH,
+            torch_dtype=DTYPE
+        )
+    else:
+        pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(
+            MODEL_PATH,
+            torch_dtype=DTYPE
+        )
 
-# Use Karras scheduler (similar to Exponential)
-text2img_pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-    text2img_pipe.scheduler.config,
-    use_karras_sigmas=True
-)
+    pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+        pipe.scheduler.config,
+        use_karras_sigmas=True
+    )
 
-# Load image-to-image pipeline
-img2img_pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(
-    MODEL_PATH,
-    torch_dtype=DTYPE
-).to(DEVICE)
-
-img2img_pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-    img2img_pipe.scheduler.config,
-    use_karras_sigmas=True
-)
-
-# Optimize memory
-for pipe in [text2img_pipe, img2img_pipe]:
+    # Enable memory optimizations
     pipe.enable_attention_slicing()
     pipe.enable_vae_slicing()
+    pipe.enable_vae_tiling()
+    pipe.enable_model_cpu_offload()
 
-print("✅ Both pipelines loaded successfully with recommended configuration!")
+    pipe = pipe.to(DEVICE)
+    return pipe
+
 
 def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
-    """Generate an image from a text prompt or refine with img2img highres fix."""
+    """Generate an image from text or refine using img2img with highres fix."""
     save_dir = "static"
     os.makedirs(save_dir, exist_ok=True)
     img_name = f"{random.randint(1000, 9999)}.png"
@@ -62,27 +60,45 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
 
     if init_image:
         print("🎨 Running Image-to-Image with Highres Fix...")
+        pipe = get_pipe("img2img")
+
+        # Resize with moderate upscale
         init_image = init_image.convert("RGB")
-        upscale = 1.5  # upscale factor
+        upscale = 1.3
         new_size = (int(init_image.width * upscale), int(init_image.height * upscale))
         init_image = init_image.resize(new_size, Image.Resampling.LANCZOS)
 
-        result = img2img_pipe(
+        result = pipe(
             prompt=prompt,
             image=init_image,
-            strength=0.4,              # denoising for highres.fix
-            num_inference_steps=30,    # recommended steps
-            guidance_scale=3.5         # CFG between 2.5 and 4.5
+            strength=0.4,
+            num_inference_steps=30,
+            guidance_scale=3.5
         )
     else:
         print(f"🖋️ Running Text-to-Image for prompt: {prompt}")
-        result = text2img_pipe(
+        pipe = get_pipe("text2img")
+
+        result = pipe(
             prompt,
             num_inference_steps=30,
             guidance_scale=3.5
         )
 
+    # Save output
     image = result.images[0]
     image.save(save_path)
     print(f"✅ Generated: {save_path}")
+
+    # Free VRAM
+    del pipe
+    torch.cuda.empty_cache()
+
     return save_path
+
+
+if __name__ == "__main__":
+    # Example usage
+    print("✨ Example text-to-image generation...")
+    path = generate_image("a futuristic cyberpunk cityscape at night, neon reflections on wet streets")
+    print(f"📁 Saved to: {path}")
