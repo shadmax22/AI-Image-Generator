@@ -23,8 +23,9 @@ else:
 
 print(f"🔄 Using device: {DEVICE}")
 
-# Function to dynamically load pipelines
-def get_pipe(pipe_type="text2img"):
+# ------------ MODEL INITIALIZATION (ON LOAD ONLY) ------------
+def init_pipe(pipe_type="text2img"):
+    print(f"⚙️ Initializing {pipe_type} pipeline...")
     if pipe_type == "text2img":
         pipe = StableDiffusionXLPipeline.from_single_file(
             MODEL_PATH,
@@ -38,21 +39,27 @@ def get_pipe(pipe_type="text2img"):
 
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(
         pipe.scheduler.config,
-        use_karras_sigmas=True
+        algorithm_type="dpmsolver++",
+        solver_order=3,
+        use_karras_sigmas=False  # Simple (beta upscale) scheduler
     )
 
-    # Enable memory optimizations
     pipe.enable_attention_slicing()
     pipe.enable_vae_slicing()
     pipe.enable_vae_tiling()
     pipe.enable_model_cpu_offload()
 
     pipe = pipe.to(DEVICE)
+    print(f"✅ {pipe_type} pipeline ready.")
     return pipe
 
 
+# Load once globally
+TEXT2IMG_PIPE = init_pipe("text2img")
+IMG2IMG_PIPE = init_pipe("img2img")
+
 def print_vram():
-    """Print current VRAM usage (for debugging)."""
+    """Print current VRAM usage."""
     if torch.cuda.is_available():
         used = torch.cuda.memory_allocated() / 1e9
         total = torch.cuda.get_device_properties(0).total_memory / 1e9
@@ -70,11 +77,11 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
 
     if init_image:
         print("🎨 Running Image-to-Image with Highres Fix...")
-        pipe = get_pipe("img2img")
+        pipe = IMG2IMG_PIPE
 
         init_image = init_image.convert("RGB")
 
-        # Step 1: Limit large image resolution
+        # Resize large images
         MAX_RES = 1024
         w, h = init_image.size
         if max(w, h) > MAX_RES:
@@ -83,47 +90,39 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
             print(f"📏 Resizing uploaded image {w}x{h} → {new_size}")
             init_image = init_image.resize(new_size, Image.Resampling.LANCZOS)
 
-        # Step 2: Light upscale (for highres fix)
+        # Light upscale (for highres fix)
         upscale = 1.2
         new_size = (int(init_image.width * upscale), int(init_image.height * upscale))
         init_image = init_image.resize(new_size, Image.Resampling.LANCZOS)
 
         print_vram()
 
-        # Step 3: Run pipeline
         result = pipe(
             prompt=prompt,
             image=init_image,
             strength=0.4,
             num_inference_steps=30,
-            guidance_scale=3.5
+            guidance_scale=3
         )
     else:
         print(f"🖋️ Running Text-to-Image for prompt: {prompt}")
-        pipe = get_pipe("text2img")
+        pipe = TEXT2IMG_PIPE
 
         result = pipe(
             prompt,
             num_inference_steps=30,
-            guidance_scale=3.5
+            guidance_scale=3
         )
 
-    # Step 4: Save output image
     image = result.images[0]
     image.save(save_path)
     print(f"✅ Generated: {save_path}")
-
-    # Step 5: Free VRAM
-    del pipe
-    torch.cuda.empty_cache()
-    print("🧹 VRAM cleaned up.")
 
     print_vram()
     return save_path
 
 
 if __name__ == "__main__":
-    # Example test
-    print("✨ Example text-to-image run...")
+    print("✨ Model loaded and ready.")
     path = generate_image("a realistic photo of an astronaut riding a horse on Mars, cinematic lighting")
     print(f"📁 Saved to: {path}")
