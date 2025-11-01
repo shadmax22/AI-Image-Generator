@@ -53,14 +53,14 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
             prompt=prompt,
             image=init_image,
             strength=0.5,
-            num_inference_steps=20,
+            num_inference_steps=30,
             guidance_scale=7.5
         )
     else:
         print(f"🖋️ Running Text-to-Image for prompt: {prompt}")
         result = text2img_pipe(
             prompt,
-            num_inference_steps=15,
+            num_inference_steps=30,
             guidance_scale=7.5
         )
 
