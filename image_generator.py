@@ -3,11 +3,10 @@ from PIL import Image
 import torch
 import random
 import os
-import gc
 
 MODEL_PATH = "./models/model.safetensors"
 
-# Detect device and data type
+# Detect device
 if torch.cuda.is_available():
     DEVICE = "cuda"
     DTYPE = torch.float16
@@ -20,27 +19,23 @@ else:
 
 print(f"🔄 Loading Stable Diffusion XL pipelines on device: {DEVICE}")
 
-# Function to safely load a pipeline with large model support
-def load_pipeline(pipeline_class, model_path, device, dtype):
-    try:
-        pipe = pipeline_class.from_single_file(
-            model_path,
-            torch_dtype=dtype,
-            disable_mmap=True,      # prevents 20GB mmap allocation
-            device_map="auto" if device == "cuda" else None
-        )
-        pipe.to(device)
-        pipe.enable_attention_slicing()
-        pipe.enable_vae_slicing()
-        print(f"✅ {pipeline_class.__name__} loaded successfully!")
-        return pipe
-    except Exception as e:
-        print(f"❌ Failed to load {pipeline_class.__name__}: {e}")
-        raise
+# Load pipelines
+text2img_pipe = StableDiffusionXLPipeline.from_single_file(
+    MODEL_PATH,
+    torch_dtype=DTYPE
+).to(DEVICE)
 
-# Load both pipelines
-text2img_pipe = load_pipeline(StableDiffusionXLPipeline, MODEL_PATH, DEVICE, DTYPE)
-img2img_pipe = load_pipeline(StableDiffusionXLImg2ImgPipeline, MODEL_PATH, DEVICE, DTYPE)
+img2img_pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(
+    MODEL_PATH,
+    torch_dtype=DTYPE
+).to(DEVICE)
+
+# Optimize for memory
+for pipe in [text2img_pipe, img2img_pipe]:
+    pipe.enable_attention_slicing()
+    pipe.enable_vae_slicing()
+
+print("✅ Both pipelines loaded successfully!")
 
 
 def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
@@ -50,6 +45,7 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
     img_name = f"{random.randint(1000, 9999)}.png"
     save_path = os.path.join(save_dir, img_name)
 
+    # Common settings
     guidance_scale = 8
     num_inference_steps = 50
 
@@ -58,12 +54,12 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
         init_image = init_image.convert("RGB")
         w, h = init_image.size
 
-        # Resize safely for large inputs
+        # Resize softly if huge image
         if max(w, h) > 1024:
             factor = 1024 / max(w, h)
             init_image = init_image.resize((int(w * factor), int(h * factor)))
 
-        # Dynamic strength to reduce blur
+        # Dynamic strength (less blur for high-res)
         strength = 0.25 if max(w, h) > 800 else 0.35
 
         result = img2img_pipe(
@@ -84,16 +80,4 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
     image = result.images[0]
     image.save(save_path)
     print(f"✅ Generated: {save_path}")
-
-    # Optional memory cleanup (useful for long runs)
-    torch.cuda.empty_cache()
-    gc.collect()
-
     return save_path
-
-
-# Optional: quick test when running directly
-if __name__ == "__main__":
-    prompt = "a futuristic city skyline at sunset, ultra realistic, cinematic lighting"
-    path = generate_image(prompt)
-    print("Output saved at:", path)
