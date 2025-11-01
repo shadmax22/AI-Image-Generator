@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Image Generator</title>
+    <style>
+      /* Base Styling for a clean, modern, and mobile-friendly look */
+      :root {
+        --primary-color: #3f51b5; /* Indigo */
+        --secondary-color: #f5f5f5; /* Light Gray */
+        --text-color: #333;
+        --background-color: #ffffff;
+        --shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: var(--secondary-color);
+        color: var(--text-color);
+        line-height: 1.6;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        display: grid;
+        grid-template-columns: 1fr; /* Single column on mobile */
+        gap: 30px;
+      }
+
+      @media (min-width: 768px) {
+        .container {
+          grid-template-columns: 1fr 2fr; /* Two columns on desktop/tablet */
+        }
+      }
+
+      header {
+        grid-column: 1 / -1;
+        text-align: center;
+        padding: 20px 0;
+        background-color: var(--primary-color);
+        color: white;
+        box-shadow: var(--shadow);
+        border-radius: 8px;
+      }
+
+      /* Panel Styling */
+      .generator-panel,
+      .image-display-panel,
+      .history-panel {
+        background: var(--background-color);
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+
+      .history-panel {
+        grid-column: 1 / -1; /* Full width for history */
+      }
+
+      h2 {
+        color: var(--primary-color);
+        margin-top: 0;
+        border-bottom: 2px solid var(--secondary-color);
+        padding-bottom: 10px;
+      }
+
+      /* Form Elements */
+      .form-group {
+        margin-bottom: 15px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+
+      input[type="text"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-sizing: border-box;
+        transition: border-color 0.3s;
+      }
+
+      button {
+        background-color: var(--primary-color);
+        color: white;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background-color 0.3s, transform 0.1s;
+        width: 100%;
+      }
+
+      button:hover {
+        background-color: #303f9f;
+      }
+      button:disabled {
+        background-color: #9fa8da;
+        cursor: not-allowed;
+      }
+
+      /* Image Display */
+      .image-display-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 400px;
+      }
+
+      #result-image-container {
+        width: 100%;
+        max-width: 512px;
+        aspect-ratio: 1 / 1;
+        background: #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border-radius: 8px;
+        margin-top: 20px;
+      }
+
+      #result-image {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: none;
+      }
+
+      .placeholder-text {
+        color: #757575;
+        text-align: center;
+        padding: 20px;
+      }
+
+      /* Loading Spinner */
+      .loading-spinner {
+        border: 8px solid #f3f3f3;
+        border-top: 8px solid var(--primary-color);
+        border-radius: 50%;
+        width: 60px;
+        height: 60px;
+        animation: spin 1s linear infinite;
+        display: none;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* History Gallery */
+      #image-history {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        gap: 10px;
+        padding-top: 10px;
+      }
+
+      .history-item {
+        cursor: pointer;
+        overflow: hidden;
+        border-radius: 4px;
+        transition: transform 0.2s;
+      }
+
+      .history-item:hover {
+        transform: scale(1.05);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .history-item img {
+        width: 100%;
+        height: 100px;
+        object-fit: cover;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Unleash Your Imagination: AI Image Generator 🎨</h1>
+      </header>
+
+      <div class="generator-panel">
+        <h2>Image Generation</h2>
+        <form id="generate-form">
+          <div class="form-group">
+            <label for="prompt">Prompt</label>
+            <input
+              type="text"
+              id="prompt"
+              name="prompt"
+              placeholder="A futuristic city on Mars, cinematic lighting"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label for="image-upload"
+              >Initial Image (Optional - for Image-to-Image)</label
+            >
+            <input
+              type="file"
+              id="image-upload"
+              name="image"
+              accept="image/*"
+            />
+          </div>
+          <button type="submit" id="generate-button">Generate Image</button>
+        </form>
+        <p
+          id="error-message"
+          style="color: red; margin-top: 15px; display: none"
+        >
+          Error
+        </p>
+      </div>
+
+      <div class="image-display-panel">
+        <h2>Result</h2>
+        <div id="result-image-container">
+          <div class="loading-spinner" id="loading-spinner"></div>
+          <img id="result-image" alt="Generated Image" />
+          <p class="placeholder-text" id="placeholder-text">
+            Enter a prompt and hit 'Generate' to see your creation!
+          </p>
+        </div>
+      </div>
+
+      <div class="history-panel">
+        <h2>History Gallery</h2>
+        <div id="image-history">
+          <p id="history-loading-text">Loading history...</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const form = document.getElementById("generate-form");
+      const promptInput = document.getElementById("prompt");
+      const imageUpload = document.getElementById("image-upload");
+      const generateButton = document.getElementById("generate-button");
+      const resultImage = document.getElementById("result-image");
+      const spinner = document.getElementById("loading-spinner");
+      const placeholderText = document.getElementById("placeholder-text");
+      const historyContainer = document.getElementById("image-history");
+      const errorMessage = document.getElementById("error-message");
+      const historyLoadingText = document.getElementById(
+        "history-loading-text"
+      );
+
+      // Helper function to set the main image display
+      function displayImage(url) {
+        resultImage.src = url;
+        resultImage.style.display = "block";
+        spinner.style.display = "none";
+        placeholderText.style.display = "none";
+      }
+
+      // 1. & 2. Handle Image Generation (Text2Img & Img2Img)
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errorMessage.style.display = "none";
+
+        if (!promptInput.value.trim()) {
+          alert("Please enter a prompt.");
+          return;
+        }
+
+        // Set loading state
+        generateButton.disabled = true;
+        generateButton.textContent = "Generating...";
+        spinner.style.display = "block";
+        resultImage.style.display = "none";
+        placeholderText.style.display = "none";
+
+        const formData = new FormData();
+        formData.append("prompt", promptInput.value);
+
+        const imageFile = imageUpload.files[0];
+        if (imageFile) {
+          formData.append("image", imageFile); // For Image-to-Image API
+        }
+
+        try {
+          const response = await fetch("/generate", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+
+          if (response.ok && data.status === "success") {
+            displayImage(data.url);
+            fetchImageHistory(); // Refresh history with the new image
+          } else {
+            errorMessage.textContent =
+              data.message || "An unknown error occurred during generation.";
+            errorMessage.style.display = "block";
+            placeholderText.style.display = "block";
+          }
+        } catch (error) {
+          console.error("Fetch error:", error);
+          errorMessage.textContent =
+            "Network error: Could not connect to the server.";
+          errorMessage.style.display = "block";
+          placeholderText.style.display = "block";
+        } finally {
+          // Reset state
+          generateButton.disabled = false;
+          generateButton.textContent = "Generate Image";
+          spinner.style.display = "none";
+        }
+      });
+
+      // 3. Handle Image History Listing
+      async function fetchImageHistory() {
+        historyContainer.innerHTML = ""; // Clear previous images
+        historyLoadingText.style.display = "block";
+
+        try {
+          const response = await fetch("/images"); // Uses the existing /images API
+          const data = await response.json();
+
+          if (response.ok) {
+            historyLoadingText.style.display = "none";
+            if (data.images && data.images.length > 0) {
+              // Reverse to show newest images first
+              data.images.reverse().forEach((url) => {
+                const item = document.createElement("div");
+                item.className = "history-item";
+                // Use the full image URL from the API: /static/filename.png
+                item.innerHTML = `<img src="${url}" alt="Generated Image Thumbnail" loading="lazy">`;
+                item.onclick = () => displayImage(url);
+                historyContainer.appendChild(item);
+              });
+
+              // If no main image is shown, display the latest one from history
+              if (!resultImage.src || resultImage.style.display === "none") {
+                displayImage(data.images[data.images.length - 1]);
+              }
+            } else {
+              historyContainer.innerHTML =
+                '<p class="placeholder-text">No images generated yet.</p>';
+            }
+          } else {
+            historyContainer.innerHTML =
+              '<p style="color: red;">Could not load image history.</p>';
+          }
+        } catch (error) {
+          console.error("History fetch error:", error);
+          historyContainer.innerHTML =
+            '<p style="color: red;">Network error: Failed to fetch history.</p>';
+        }
+      }
+
+      // Load image history and set initial image when the page loads
+      document.addEventListener("DOMContentLoaded", fetchImageHistory);
+    </script>
+  </body>
+</html>

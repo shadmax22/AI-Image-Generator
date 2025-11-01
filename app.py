@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from image_generator import generate_image
 from PIL import Image
 import os
@@ -6,6 +6,13 @@ import io
 
 app = Flask(__name__)
 
+
+@app.route("/", methods=["GET"])
+def index():
+    """Serve the main index.html file for the UI."""
+    # This assumes index.html is in the same directory as app.py
+    return send_from_directory(os.path.dirname(__file__), "index.html")
+# -----------------
 
 @app.route("/generate", methods=["POST"])
 def generate():
@@ -75,4 +82,4 @@ def view_image(filename):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=3000)
