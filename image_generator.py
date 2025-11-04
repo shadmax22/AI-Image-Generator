@@ -7,6 +7,7 @@ from PIL import Image
 import torch
 import random
 import os
+import gc
 
 MODEL_PATH = "./models/model.safetensors"
 
@@ -26,30 +27,20 @@ print(f"🔄 Using device: {DEVICE}")
 # ------------ MODEL INITIALIZATION (ON LOAD ONLY) ------------
 def init_pipe(pipe_type="text2img"):
     print(f"⚙️ Initializing {pipe_type} pipeline...")
-    if pipe_type == "text2img":
-        pipe = StableDiffusionXLPipeline.from_single_file(
-            MODEL_PATH,
-            torch_dtype=DTYPE
-        )
-    else:
-        pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(
-            MODEL_PATH,
-            torch_dtype=DTYPE
-        )
+    pipe_cls = StableDiffusionXLPipeline if pipe_type == "text2img" else StableDiffusionXLImg2ImgPipeline
+    pipe = pipe_cls.from_single_file(MODEL_PATH, torch_dtype=DTYPE)
 
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(
         pipe.scheduler.config,
         algorithm_type="dpmsolver++",
         solver_order=3,
-        use_karras_sigmas=False  # Simple (beta upscale) scheduler
+        use_karras_sigmas=False
     )
 
     pipe.enable_attention_slicing()
     pipe.enable_vae_slicing()
     pipe.enable_vae_tiling()
     pipe.enable_model_cpu_offload()
-
-    pipe = pipe.to(DEVICE)
     print(f"✅ {pipe_type} pipeline ready.")
     return pipe
 
@@ -66,6 +57,15 @@ def print_vram():
         print(f"📊 VRAM used: {used:.2f} GB / {total:.2f} GB")
 
 
+def clear_memory():
+    """Force cleanup of GPU and CPU memory."""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+    gc.collect()
+    print("🧹 Memory cleared.")
+
+
 def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
     """Generate image from prompt or refine uploaded image."""
     save_dir = "static"
@@ -75,54 +75,53 @@ def generate_image(prompt: str, init_image: Image.Image | None = None) -> str:
 
     print_vram()
 
-    if init_image:
-        print("🎨 Running Image-to-Image with Highres Fix...")
-        pipe = IMG2IMG_PIPE
+    try:
+        if init_image:
+            print("🎨 Running Image-to-Image...")
+            pipe = IMG2IMG_PIPE
+            init_image = init_image.convert("RGB")
 
-        init_image = init_image.convert("RGB")
+            MAX_RES = 1024
+            w, h = init_image.size
+            if max(w, h) > MAX_RES:
+                ratio = MAX_RES / max(w, h)
+                new_size = (int(w * ratio), int(h * ratio))
+                init_image = init_image.resize(new_size, Image.Resampling.LANCZOS)
 
-        # Resize large images
-        MAX_RES = 1024
-        w, h = init_image.size
-        if max(w, h) > MAX_RES:
-            ratio = MAX_RES / max(w, h)
-            new_size = (int(w * ratio), int(h * ratio))
-            print(f"📏 Resizing uploaded image {w}x{h} → {new_size}")
+            upscale = 1.2
+            new_size = (int(init_image.width * upscale), int(init_image.height * upscale))
             init_image = init_image.resize(new_size, Image.Resampling.LANCZOS)
 
-        # Light upscale (for highres fix)
-        upscale = 1.2
-        new_size = (int(init_image.width * upscale), int(init_image.height * upscale))
-        init_image = init_image.resize(new_size, Image.Resampling.LANCZOS)
+            result = pipe(
+                prompt=prompt,
+                image=init_image,
+                strength=0.4,
+                num_inference_steps=30,
+                guidance_scale=3
+            )
+        else:
+            print(f"🖋️ Running Text-to-Image for prompt: {prompt}")
+            pipe = TEXT2IMG_PIPE
+            result = pipe(prompt, num_inference_steps=30, guidance_scale=3)
 
+        image = result.images[0]
+        image.save(save_path)
+        print(f"✅ Generated: {save_path}")
         print_vram()
 
-        result = pipe(
-            prompt=prompt,
-            image=init_image,
-            strength=0.4,
-            num_inference_steps=30,
-            guidance_scale=3
-        )
-    else:
-        print(f"🖋️ Running Text-to-Image for prompt: {prompt}")
-        pipe = TEXT2IMG_PIPE
+    finally:
+        # Clean up to prevent OOM
+        del result
+        torch.cuda.empty_cache()
+        gc.collect()
+        print("🧼 Cleared inference cache.")
 
-        result = pipe(
-            prompt,
-            num_inference_steps=30,
-            guidance_scale=3
-        )
-
-    image = result.images[0]
-    image.save(save_path)
-    print(f"✅ Generated: {save_path}")
-
-    print_vram()
     return save_path
 
 
 if __name__ == "__main__":
     print("✨ Model loaded and ready.")
-    path = generate_image("a realistic photo of an astronaut riding a horse on Mars, cinematic lighting")
-    print(f"📁 Saved to: {path}")
+    for i in range(5):
+        path = generate_image(f"A beautiful futuristic city skyline at sunset {i}")
+        print(f"📁 Saved to: {path}")
+        clear_memory()
