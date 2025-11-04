@@ -8,7 +8,7 @@ import torch
 import random
 import os
 
-MODEL_PATH = "./models/model_1.safetensors"
+MODEL_PATH = "./models/model.safetensors"
 
 # Detect device and dtype
 if torch.cuda.is_available():
